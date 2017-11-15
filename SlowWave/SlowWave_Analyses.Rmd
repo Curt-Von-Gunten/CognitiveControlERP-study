@@ -1,0 +1,127 @@
+#install.packages("evaluate")
+#install.packages("htmltools")
+#install.packages("knitr")
+#install.packages("jsonlite")
+#install.packages("base64enc")
+#install.packages("rprojroot")
+---
+title: SlowWaveanalyses
+author: Curt, 2/3/2017
+output:
+  html_document:
+    highlight: pygments
+    theme: cerulean
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(width=140)
+require(dplyr)
+require(lme4)
+require(lmerTest)
+require(ggplot2)
+```
+
+
+**Major changes: Using SlowWave data that was reprocessed to ensure correct artifact rejection processes. Appropriate electrodes were rejected for Subs 19, 74, 137 before artifact rejection process.**
+
+I quantified the SlowWave for each trial and sent it to me as a data file. I selected the trials that fit these criteria:
+
+“Current” trial will be included if:  
+1) Current trial is not rejected due to artifacts.  
+2) Current trial is not the first trial of the block (i.e. trial 1, 101, 201, 301 etc. are not included).  
+3) Both current trial and previous trial are correct.  
+
+The following electrodes are included: F3, Fz, F4, FC3, FCz, FC4, C3, Cz, C4
+
+The following subjects were excluded:  
+- 92 (wrong number of trials, possibly data collection error)  
+- 64 (<50% accuracy rate)  
+- 65 (only 187 usable trials (23.3%))
+
+Besides that, SlowWave data is missing for subs 36, 37, 39, 40, 42, 43, 46, 51, 53, 54, 56, 57, 78.
+  
+**Total sample is 36 subjects.**
+
+First, here's the plot showing SlowWave amplitude across trial with separate regression lines fitted for each condition. **This includes all data points, *not* averaged across subject or electrode.** 
+
+
+setwd("C:/Users/psycworks/Desktop/Box Sync/Bruce Projects/Sequential Processing/PointByPoint Processing/Created by R_ArtRej/SlowWave")
+path = "C:/Users/psycworks/Desktop/Box Sync/Bruce Projects/Sequential Processing/PointByPoint Processing/"
+
+
+```{r plot, echo=FALSE, warning = FALSE}
+setwd("C:/Users/psycworks/Desktop/Box Sync/Bruce Projects/Sequential Processing/PointByPoint Processing/Created by R_ArtRej/SlowWave")
+path = "C:/Users/psycworks/Desktop/Box Sync/Bruce Projects/Sequential Processing/PointByPoint Processing/"
+SlowWave.correct = read.delim("SlowWave_TBT_Cond_Wprev_3subs.txt")
+
+ggplot(SlowWave.correct[!(is.na(SlowWave.correct$MeanCurr)),], aes(Trial, MeanCurr, alpha = TrialCondition, color = TrialCondition, shape = TrialCondition)) +
+  geom_point() +
+  geom_smooth(method = "lm", se=F, lwd = 1.3) +
+  labs(x = "Trial", y = "SlowWave amplitude") +
+  scale_shape_manual(values=c(1,1,1,1)) +
+  scale_alpha_manual(values=c(.1,.1,.1,.1)) +
+  scale_color_manual(values=c("blue", "dodgerblue", "darkred", "red")) +
+  theme_bw() +
+  coord_cartesian(ylim=c(-5, 1)) +
+  ggtitle("SlowWave amplitude")
+```
+
+  
+Here's the output to the MLM with current and previous trial compatibility and trial as predictors. Trial is scaled to range from 0 to 8 (instead of 1 to 800) so that the betas associated with trial are a little bigger (but significance testing is unaffected by linear scaling, so the test statistics and p values will be the same as if we used the unscaled Trial variable).   
+
+The intercept and slopes of current and previous trial condition are allowed to vary by subject. The intercept is allowed to vary by electrode nested within subject.   
+
+Categorical variables are effect coded. 
+
+```{r rescaleTrial, echo=FALSE}
+
+# rescale trial
+SlowWave.correct$Trial.begin = (SlowWave.correct$Trial-2)/100
+# shift trial to look at fixed effects at middle and end of task as well
+SlowWave.correct$Trial.middle = SlowWave.correct$Trial.begin - 4
+SlowWave.correct$Trial.end = SlowWave.correct$Trial.begin - 8
+
+# add effect codes for categorical variables
+SlowWave.correct$Previous = NA
+SlowWave.correct$Previous[SlowWave.correct$prevCond == "compat"] = -1
+SlowWave.correct$Previous[SlowWave.correct$prevCond == "incompat"] = 1
+
+SlowWave.correct$Current = NA
+SlowWave.correct$Current[SlowWave.correct$Condition == "Comp"] = -1
+SlowWave.correct$Current[SlowWave.correct$Condition == "InComp"] = 1
+
+```
+## SlowWave results for beginning of experiment
+``` {r model1, echo = FALSE}
+
+m1 = lmer(MeanCurr ~ Current*Previous*Trial.begin + 
+       (Current*Previous|Subject) + (1|Electrode:Subject), data = SlowWave.correct)
+
+summary(m1)
+```
+
+
+## SlowWave results for middle of experiment  
+Trial is shifted to look at fixed effects at the middle and the end of the experiment (i.e. shift so that the mean of trial is 0 and ranges from -4 to 4 and then shift so that trial ranges from -8 to 0).  
+*Just the fixed effects are shown, the random effects will be the same as the first model.*
+
+``` {r model2, echo = FALSE}
+# effect
+m2 = lmer(MeanCurr ~ Current*Previous*Trial.middle + 
+       (Current*Previous|Subject) + (1|Electrode:Subject), data = SlowWave.correct)
+
+round(summary(m2)$coefficients, digits = 4)
+
+```
+
+
+## SlowWave results for end of experiment
+``` {r model3, echo = FALSE}
+m3 = lmer(MeanCurr ~ Current*Previous*Trial.end + 
+       (Current*Previous|Subject) + (1|Electrode:Subject), data = SlowWave.correct)
+
+round(summary(m3)$coefficients, digits = 4)
+
+```

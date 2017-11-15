@@ -1,0 +1,59 @@
+---
+title: Associations Across Trial
+author: Curt, 3/08/2017
+output:
+  html_document:
+    highlight: pygments
+    theme: cerulean
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(dplyr)
+require(lme4)
+require(lmerTest)
+require(ggplot2)
+setwd("C:/Users/cdvrmd/Box Sync/Bruce Projects/Sequential Processing/PointByPoint Processing/Created by R_ArtRej")
+TrialElectLev_dat = read.delim("RT_N2_SlowWave_trial&ElecLev_R.txt")
+MeanCent_dat = read.delim("RT_N2_SlowWave_MeanCent_R.txt" )
+```
+
+A datapoint will be included if:  
+1) Current trial is not rejected due to artifacts.  
+2) Current trial is not the first trial of the block (i.e. trial 1, 101, 201, 301 etc. are not included).  
+3) Both current trial and previous trial are correct.
+4) Previous trial has not been rejecred due to artifacts.
+
+SlowWavePrev and N2Curr difference scores across Trial.
+```{r data, echo = FALSE}
+#**************************************************************************************************************
+#  ************************Difference Scores Across Trial************************;
+#SlowWavePrev and N2Curr difference scores across Trial.
+N2_SW_diff_Out = lmer(N2_SW_diff ~ Trial*Prev*Curr +  
+                                     (Curr*Prev|Subject)  + (1|Electrode:Subject), data = TrialElectLev_dat)
+summary(N2_SW_diff_Out)
+
+```
+
+
+#RT and SWPrev difference scores across Trial.
+```{r data, echo = FALSE}
+#**************************************************************************************************************
+#  ************************Difference Scores Across Trial************************;
+RT_SW_diff_Out = lmer(RT_SW_diff ~ Trial*Prev*Curr + 
+                                     (Curr*Prev|Subject) + (1|Electrode:Subject), data = TrialElectLev_dat)
+summary(RT_SW_diff_Out)
+
+```
+
+
+#RT and N2Curr difference scores across Trial.
+```{r data, echo = FALSE}
+#**************************************************************************************************************
+#  ************************Difference Scores Across Trial************************;
+RT_N2_diff__Out = lmer(RT_N2_diff~ Trial*Prev*Curr +  
+                                     (Curr*Prev|Subject)  + (1|Electrode:Subject), data = TrialElectLev_dat)
+summary(RT_N2_diff__Out)
+```
+

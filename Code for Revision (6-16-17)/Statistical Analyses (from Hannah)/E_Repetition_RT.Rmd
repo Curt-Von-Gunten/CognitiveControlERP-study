@@ -1,0 +1,847 @@
+---
+title: Repetition analyses (RT)
+author: Hannah, 6/30/2017
+output:
+  html_document:
+    highlight: pygments
+    theme: cerulean
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(out.width = '50%')
+knitr::opts_chunk$set(warning = FALSE)
+options(width=140)
+require(dplyr)
+require(ggplot2)
+require(lme4)
+require(lmerTest)
+require(knitr)
+```
+
+
+**Major changes: Fixed FlankerRep and TargetRep to include duplications (e.g., 130 followed by 130). Added model with TargetRep included as covariate.**
+
+
+### 1. REACTION TIME
+Uses RT data from Alc Caf for condition 4 (Placebo-placebo) and condition 5 (Control).
+
+“Current” trial will be included if:  
+1) Current trial is not the first trial of the block (i.e. trial 1, 101, 201, 301 etc. are not included).  
+2) Both current trial and previous trial are correct.  
+3) RT is longer than 200 ms and shorter than 2000 ms.
+
+The following subjects were excluded:  
+- 92 (wrong number of trials, possibly data collection error)  
+- 64 (<50% accuracy rate)  
+
+Each subject did 800 trials, with 100 trials in each of 8 blocks.
+
+**Total sample is 50 subjects.**
+
+Trigger Codes:
+Comp: Target Left, Flanker Left = 110.  
+Comp: Target Right, Flanker Right = 130.  
+Incomp: Target Left, Flanker Right = 150.  
+Incomp: Target Right, Flanker Left = 170.  
+
+CompleteRep (24.3%) = repetition of same trial (e.g., excludes 110 following 110)    
+AnyRep (74.8%) = either target or flanker is repeated (only includes 110/130 pair, 150/170 pair)  
+TargetRep (~50%) = target is repeated (excludes 150/110 pair, 170/130 pair)  
+FlankerRep (~50%) = flanker is repeated (excludes 150/130 pair, 170/110 pair)  
+
+```{r RTdata, echo = FALSE}
+setwd("C:/Users/cdvrmd/Box Sync/Bruce Projects/Sequential Processing/PointByPoint Processing/Manuscript/Review & Resubmission")
+dat = read.delim("RT_AllSubs_TBT_Cond_Prev_Rep.txt")
+dat = dat[dat$ACC == 1 & dat$PrevTrialACC == 1,]
+
+# discard trials for which RT is less than 100 and greater than 2000
+dat$RTdrop = dat$RT_Raw
+dat$RTdrop[dat$RT_Raw < 100] = NA
+dat$RTdrop[dat$RT_Raw > 2000] = NA
+
+# add trial information
+dat$prevTrialType = NA
+dat$prevTrialType[dat$PrevTrialType == 1] = "compatible"
+dat$prevTrialType[dat$PrevTrialType == 2] = "incompatible"
+dat$prevTrialType = factor(dat$prevTrialType)
+
+# Fix TargetRep and FlankerRep columns to flag duplications
+dat$TargetRep[dat$StimOnsetCode == dat$PrevStimOnsetCode] = 1
+dat$FlankerRep[dat$StimOnsetCode == dat$PrevStimOnsetCode] = 1
+
+# select subjects in Condition 4 and 5, take out 92 and 64
+dat.use = dat[dat$Condition == 4|dat$Condition == 5,] %>% 
+  filter(Subject != 92) %>% 
+  filter(Subject != 64)
+
+dat.use$Condition = paste(dat.use$prevTrialType, dat.use$TrialType, sep="_")
+
+tapply(dat.use$RTdrop100_2000, dat.use$TrialType, mean)
+tapply(dat.use$RTdrop100_2000, dat.use$Condition, mean)
+
+# make effect coding variables
+dat.use$Current.e = NA
+dat.use$Current.e[dat.use$TrialType == "compatible"] = -1
+dat.use$Current.e[dat.use$TrialType == "Incompatible"] = 1
+
+dat.use$Previous.e = NA
+dat.use$Previous.e[dat.use$prevTrialType == "compatible"] = -1
+dat.use$Previous.e[dat.use$prevTrialType == "incompatible"] = 1
+
+# add label for trial condition
+dat.use$TrialCondition = "Previous compatible - Current incompatible"
+dat.use$TrialCondition[dat.use$prevTrialType == "compatible" & dat.use$TrialType == "compatible"] = 
+  "Previous compatible - Current compatible"
+dat.use$TrialCondition[dat.use$prevTrialType == "incompatible" & dat.use$TrialType == "Incompatible"] = 
+  "Previous incompatible - Current incompatible"
+dat.use$TrialCondition[dat.use$prevTrialType == "incompatible" & dat.use$TrialType == "compatible"] = 
+  "Previous incompatible - Current compatible"
+dat.use$TrialCondition = factor(dat.use$TrialCondition)
+
+# data set up in 8 blocks, trial goes 1-100 in each block
+# add column for trial number across whole experiment so it goes 1-800
+dat.use$ExpTrial = dat.use$Trial + (100*(dat.use$Block - 1))
+
+# rescale trial
+dat.use$Trial.begin = (dat.use$ExpTrial-2)/100
+# shift trial to look at fixed effects at middle and end of task as well
+dat.use$Trial.middle = dat.use$Trial.begin - 4
+dat.use$Trial.end = dat.use$Trial.begin - 8
+
+
+```
+#### A. TargetRep trials taken out
+
+##### Plot over whole task 
+**Slopes and estimates of lines are from the MLM, not fitted with OLS.** 
+
+``` {r trialLevel, echo = FALSE, warning = FALSE}
+
+# find slopes and intercepts with dummy coded model, trial (unscaled) is included
+plot1.d <- lmer(RTdrop ~ TrialType*prevTrialType*ExpTrial + (TrialType+prevTrialType|Subject), data = filter(dat.use, TargetRep == 0))
+
+parms <- fixef(plot1.d) # fixed parameters from model
+vcmat <- vcov(plot1.d) # variance/covariance matrix of fixed effects
+
+# First calculate slopes
+
+## each row of this matrix defines entries of parms that we want to combine:
+STmat <- matrix(NA,4,8)
+STmat[1,] <- c(rep(0,3),1,0,0,0,0) # slope for current = 0, previous = 0 (current compat-previous compat)
+STmat[2,] <- c(rep(0,3),1,0,0,1,0) # slope for current = 0, previous = 1 (current compat-previous incompat)
+STmat[3,] <- c(rep(0,3),1,0,1,0,0) # slope for current = 1, previous = 0 (current incompat-previous compat)
+STmat[4,] <- c(rep(0,3),1,0,1,1,1) # slope for current = 1, previous = 1 (current incompat-previous incompat)
+
+Sparest <- STmat %*% parms          # see above for notation
+Snewvc <- STmat %*% vcmat %*% t(STmat)
+Sses <- sqrt(diag(Snewvc)) 
+
+slopes = cbind(Sparest, Sses) %>% as.data.frame()
+names(slopes) = c("Slope", "Slope_SE")
+
+# Next calculate intercepts
+
+## each row of this matrix defines entries of parms that we want to combine:
+ITmat <- matrix(NA,4,8)
+ITmat[1,] <- c(1,0,0,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+ITmat[2,] <- c(1,0,1,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+ITmat[3,] <- c(1,1,0,0,0,rep(0,3)) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+ITmat[4,] <- c(1,1,1,0,1,rep(0,3)) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+Iparest <- ITmat %*% parms          # see above for notation
+Inewvc <- ITmat %*% vcmat %*% t(ITmat)
+Ises <- sqrt(diag(Inewvc)) 
+
+## final results
+intercepts = cbind(Iparest, Ises) %>% as.data.frame()
+names(intercepts) = c("Intercept", "Intercept_SE")
+
+forPlotting = cbind(slopes, intercepts)
+
+# label for understanding
+forPlotting$TrialCondition = c("Previous compatible - Current compatible",
+                          "Previous incompatible - Current compatible",
+                          "Previous compatible - Current incompatible",
+                          "Previous incompatible - Current incompatible")
+
+
+# BINGO -------------------------------------------------------------------
+ggplot(filter(dat.use, TargetRep == 0), aes(ExpTrial, RTdrop, alpha = TrialCondition, color = TrialCondition, shape = TrialCondition)) +
+  geom_point() +
+  geom_abline(data = forPlotting, aes(intercept=Intercept, slope=Slope, color = TrialCondition, linetype = TrialCondition), size=1)+
+  labs(x = "Trial", y = "Reaction Time (ms)") +
+  scale_shape_manual(values=c(1,19,1,19)) +
+  scale_alpha_manual(values=c(.1,.1,.1,.1)) +
+  scale_color_manual(values=c("blue", "blue", "red", "red")) +
+  scale_linetype_manual(values=c("longdash", "solid", "longdash", "solid")) +
+  theme_bw() +
+  coord_cartesian(ylim=c(325, 500))
+#  ggtitle("Plotted with estimates from MLM") +  
+  # theme(plot.title = element_text(hjust = 0.5, size = 20),
+  #       axis.title = element_text(size=20),
+  #       axis.text.x = element_text(size=16),
+  #       axis.text.y = element_text(size=16))
+```
+
+##### Simple slopes
+
+Trial is scaled to range from 0 to 8 (instead of 1 to 800) so that the betas associated with trial are a little bigger (but significance testing is unaffected by linear scaling, so the test statistics and p values will be the same as if we used the unscaled Trial variable).
+
+``` {r simple, echo = FALSE}
+
+# find slopes with dummy coded model, trial is scaled
+begin.d <- lmer(RTdrop ~ TrialType*prevTrialType*Trial.begin + (TrialType+prevTrialType|Subject), data = filter(dat.use, TargetRep == 0))
+
+parms <- fixef(begin.d) # fixed parameters from model
+vcmat <- vcov(begin.d) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(rep(0,3),1,0,0,0,0) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(rep(0,3),1,0,0,1,0) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(rep(0,3),1,0,1,0,0) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(rep(0,3),1,0,1,1,1) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## final results
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+fin = format(fin, digits = 3)
+
+# relabel for understanding
+fin$Current = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Previous = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Color = c("blue dashed", "red dashed", "blue solid", "red solid")
+
+fin = rename(fin, Estimate = est, SE = ses, ci95_lower = lbnd, ci95_upper = ubnd)
+
+# display
+kable(fin)
+```
+
+##### Fixed effects of Trial and interactions with Trial:  
+Trial is centered and scaled to range from -4 to 4.
+
+``` {r}
+begin.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.begin + (Current.e*Previous.e|Subject), data = filter(dat.use, TargetRep == 0))
+
+kable(round(summary(begin.e)$coefficients[c(4, 6:8),1:5], digits = 3))
+```
+
+##### Fixed effects at beginning of task:  
+```{r}
+kable(round(summary(begin.e)$coefficients[c(1:3,5),1:5], digits = 3))
+```
+
+**Marginal means:**  
+Error bars represent standard error.  
+``` {r}
+# use dummy coded model
+begin.d <- lmer(RTdrop ~ TrialType*prevTrialType*Trial.begin + (TrialType+prevTrialType|Subject), data = filter(dat.use, TargetRep == 0))
+parms <- fixef(begin.d) # fixed parameters from model
+vcmat <- vcov(begin.d) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(1,0,0,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(1,0,1,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(1,1,0,0,0,rep(0,3)) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(1,1,0,0,1,rep(0,3)) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## calculate estimates, standard error
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+# format for understanding
+fin$Current = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Previous = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Previous = factor(fin$Previous)
+fin$Current = factor(fin$Current)
+fin = rename(fin, Estimate = est, SE = ses) 
+
+# for plot
+limits <- aes(ymax = Estimate + SE, ymin=Estimate - SE)
+ggplot(fin, aes(x = Previous, y = Estimate, group = Current, color = Current, linetype = Current)) +
+  geom_line() +
+  geom_point(size = 4) +
+  geom_errorbar(limits, width=0.2, linetype="solid") +
+  ylab("Reaction Time (ms)") +
+  xlab("Previous Trial") +
+  coord_cartesian(ylim = c(350, 475)) +
+  scale_color_manual(values=c("black", "red"), guide = guide_legend(title = "Current trial")) +
+  scale_linetype_manual(values=c("solid", "dashed"), guide = F) +
+  theme_bw() +
+  ggtitle("Beginning (no TargetRep)") 
+  # theme(plot.title = element_text(hjust = 0.5, size = 20),
+  #       axis.title = element_text(size=20),
+  #       axis.text.x = element_text(size=16),
+  #       axis.text.y = element_text(size=16))
+
+```
+
+##### Fixed effects at middle of task:  
+```{r}
+middle.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.middle + (Current.e*Previous.e|Subject), data = filter(dat.use, TargetRep == 0))
+
+kable(round(summary(middle.e)$coefficients[c(1:3,5),1:5], digits = 3))
+```
+
+**Marginal means:**  
+Error bars represent standard error.  
+``` {r}
+# use dummy coded model
+middle.d <- lmer(RTdrop ~ TrialType*prevTrialType*Trial.middle + (TrialType+prevTrialType|Subject), data = filter(dat.use, TargetRep == 0))
+parms <- fixef(middle.d) # fixed parameters from model
+vcmat <- vcov(middle.d) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(1,0,0,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(1,0,1,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(1,1,0,0,0,rep(0,3)) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(1,1,0,0,1,rep(0,3)) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## calculate estimates, standard error
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+# format for understanding
+fin$Current = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Previous = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Previous = factor(fin$Previous)
+fin$Current = factor(fin$Current)
+fin = rename(fin, Estimate = est, SE = ses) 
+
+# for plot
+limits <- aes(ymax = Estimate + SE, ymin=Estimate - SE)
+ggplot(fin, aes(x = Previous, y = Estimate, group = Current, color = Current, linetype = Current)) +
+  geom_line() +
+  geom_point(size = 4) +
+  geom_errorbar(limits, width=0.2, linetype="solid") +
+  ylab("Reaction Time (ms)") +
+  xlab("Previous Trial") +
+  coord_cartesian(ylim = c(350, 475)) +
+  scale_color_manual(values=c("black", "red"), guide = guide_legend(title = "Current trial")) +
+  scale_linetype_manual(values=c("solid", "dashed"), guide = F) +
+  theme_bw() +
+  ggtitle("Middle (no TargetRep)") 
+  # theme(plot.title = element_text(hjust = 0.5, size = 20),
+  #       axis.title = element_text(size=20),
+  #       axis.text.x = element_text(size=16),
+  #       axis.text.y = element_text(size=16))
+
+```
+
+##### Fixed effects at end of task:  
+```{r}
+end.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.end + (Current.e*Previous.e|Subject), data = filter(dat.use, TargetRep == 0))
+
+kable(round(summary(end.e)$coefficients[c(1:3,5),1:5], digits = 3))
+```
+    
+**Marginal means:**  
+Error bars represent standard error.  
+``` {r}
+# use dummy coded model
+end.d <- lmer(RTdrop ~ TrialType*prevTrialType*Trial.end + (TrialType+prevTrialType|Subject), data = filter(dat.use, TargetRep == 0))
+parms <- fixef(end.d) # fixed parameters from model
+vcmat <- vcov(end.d) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(1,0,0,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(1,0,1,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(1,1,0,0,0,rep(0,3)) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(1,1,0,0,1,rep(0,3)) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## calculate estimates, standard error
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+# format for understanding
+fin$Current = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Previous = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Previous = factor(fin$Previous)
+fin$Current = factor(fin$Current)
+fin = rename(fin, Estimate = est, SE = ses) 
+
+# for plot
+limits <- aes(ymax = Estimate + SE, ymin=Estimate - SE)
+ggplot(fin, aes(x = Previous, y = Estimate, group = Current, color = Current, linetype = Current)) +
+  geom_line() +
+  geom_point(size = 4) +
+  geom_errorbar(limits, width=0.2, linetype="solid") +
+  ylab("Reaction Time (ms)") +
+  xlab("Previous Trial") +
+  coord_cartesian(ylim = c(350, 475)) +
+  scale_color_manual(values=c("black", "red"), guide = guide_legend(title = "Current trial")) +
+  scale_linetype_manual(values=c("solid", "dashed"), guide = F) +
+  theme_bw() +
+  ggtitle("End (no TargetRep)") 
+  # theme(plot.title = element_text(hjust = 0.5, size = 20),
+  #       axis.title = element_text(size=20),
+  #       axis.text.x = element_text(size=16),
+  #       axis.text.y = element_text(size=16))
+
+```
+
+#### B. CompleteRep trials taken out
+
+##### Plot over whole task 
+**Slopes and estimates of lines are from the MLM, not fitted with OLS.** 
+
+``` {r trialLevel2, echo = FALSE, warning = FALSE}
+
+# find slopes and intercepts with dummy coded model, trial (unscaled) is included
+plot1.d <- lmer(RTdrop ~ TrialType*prevTrialType*ExpTrial + (TrialType+prevTrialType|Subject), data = filter(dat.use, CompleteRep == 0))
+
+parms <- fixef(plot1.d) # fixed parameters from model
+vcmat <- vcov(plot1.d) # variance/covariance matrix of fixed effects
+
+# First calculate slopes
+
+## each row of this matrix defines entries of parms that we want to combine:
+STmat <- matrix(NA,4,8)
+STmat[1,] <- c(rep(0,3),1,0,0,0,0) # slope for current = 0, previous = 0 (current compat-previous compat)
+STmat[2,] <- c(rep(0,3),1,0,0,1,0) # slope for current = 0, previous = 1 (current compat-previous incompat)
+STmat[3,] <- c(rep(0,3),1,0,1,0,0) # slope for current = 1, previous = 0 (current incompat-previous compat)
+STmat[4,] <- c(rep(0,3),1,0,1,1,1) # slope for current = 1, previous = 1 (current incompat-previous incompat)
+
+Sparest <- STmat %*% parms          # see above for notation
+Snewvc <- STmat %*% vcmat %*% t(STmat)
+Sses <- sqrt(diag(Snewvc)) 
+
+slopes = cbind(Sparest, Sses) %>% as.data.frame()
+names(slopes) = c("Slope", "Slope_SE")
+
+# Next calculate intercepts
+
+## each row of this matrix defines entries of parms that we want to combine:
+ITmat <- matrix(NA,4,8)
+ITmat[1,] <- c(1,0,0,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+ITmat[2,] <- c(1,0,1,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+ITmat[3,] <- c(1,1,0,0,0,rep(0,3)) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+ITmat[4,] <- c(1,1,1,0,1,rep(0,3)) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+Iparest <- ITmat %*% parms          # see above for notation
+Inewvc <- ITmat %*% vcmat %*% t(ITmat)
+Ises <- sqrt(diag(Inewvc)) 
+
+## final results
+intercepts = cbind(Iparest, Ises) %>% as.data.frame()
+names(intercepts) = c("Intercept", "Intercept_SE")
+
+forPlotting = cbind(slopes, intercepts)
+
+# label for understanding
+forPlotting$TrialCondition = c("Previous compatible - Current compatible",
+                          "Previous incompatible - Current compatible",
+                          "Previous compatible - Current incompatible",
+                          "Previous incompatible - Current incompatible")
+
+
+# BINGO -------------------------------------------------------------------
+ggplot(filter(dat.use, CompleteRep == 0), aes(ExpTrial, RTdrop, alpha = TrialCondition, color = TrialCondition, shape = TrialCondition)) +
+  geom_point() +
+  geom_abline(data = forPlotting, aes(intercept=Intercept, slope=Slope, color = TrialCondition, linetype = TrialCondition), size=1)+
+  labs(x = "Trial", y = "Reaction Time (ms)") +
+  scale_shape_manual(values=c(1,19,1,19)) +
+  scale_alpha_manual(values=c(.1,.1,.1,.1)) +
+  scale_color_manual(values=c("blue", "blue", "red", "red")) +
+  scale_linetype_manual(values=c("longdash", "solid", "longdash", "solid")) +
+  theme_bw() +
+  coord_cartesian(ylim=c(325, 500))
+#  ggtitle("Plotted with estimates from MLM") +  
+  # theme(plot.title = element_text(hjust = 0.5, size = 20),
+  #       axis.title = element_text(size=20),
+  #       axis.text.x = element_text(size=16),
+  #       axis.text.y = element_text(size=16))
+```
+
+##### Simple slopes
+
+Trial is scaled to range from 0 to 8 (instead of 1 to 800) so that the betas associated with trial are a little bigger (but significance testing is unaffected by linear scaling, so the test statistics and p values will be the same as if we used the unscaled Trial variable).
+
+``` {r}
+
+# find slopes with dummy coded model, trial is scaled
+begin.d <- lmer(RTdrop ~ TrialType*prevTrialType*Trial.begin + (TrialType+prevTrialType|Subject), data = filter(dat.use, CompleteRep == 0))
+
+parms <- fixef(begin.d) # fixed parameters from model
+vcmat <- vcov(begin.d) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(rep(0,3),1,0,0,0,0) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(rep(0,3),1,0,0,1,0) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(rep(0,3),1,0,1,0,0) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(rep(0,3),1,0,1,1,1) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## final results
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+fin = format(fin, digits = 3)
+
+# relabel for understanding
+fin$Current = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Previous = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Color = c("blue dashed", "red dashed", "blue solid", "red solid")
+
+fin = rename(fin, Estimate = est, SE = ses, ci95_lower = lbnd, ci95_upper = ubnd)
+
+# display
+kable(fin)
+```
+
+##### Fixed effects of Trial and interactions with Trial:  
+Trial is centered and scaled to range from -4 to 4.
+
+``` {r}
+begin.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.begin + (Current.e*Previous.e|Subject), data = filter(dat.use, CompleteRep == 0))
+
+kable(round(summary(begin.e)$coefficients[c(4, 6:8),1:5], digits = 3))
+```
+
+##### Fixed effects at beginning of task:  
+```{r}
+kable(round(summary(begin.e)$coefficients[c(1:3,5),1:5], digits = 3))
+```
+
+**Marginal means:**  
+Error bars represent standard error.  
+``` {r}
+# use dummy coded model
+begin.d <- lmer(RTdrop ~ TrialType*prevTrialType*Trial.begin + (TrialType+prevTrialType|Subject), data = filter(dat.use, CompleteRep == 0))
+parms <- fixef(begin.d) # fixed parameters from model
+vcmat <- vcov(begin.d) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(1,0,0,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(1,0,1,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(1,1,0,0,0,rep(0,3)) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(1,1,0,0,1,rep(0,3)) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## calculate estimates, standard error
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+# format for understanding
+fin$Current = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Previous = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Previous = factor(fin$Previous)
+fin$Current = factor(fin$Current)
+fin = rename(fin, Estimate = est, SE = ses) 
+
+# for plot
+limits <- aes(ymax = Estimate + SE, ymin=Estimate - SE)
+ggplot(fin, aes(x = Previous, y = Estimate, group = Current, color = Current, linetype = Current)) +
+  geom_line() +
+  geom_point(size = 4) +
+  geom_errorbar(limits, width=0.2, linetype="solid") +
+  ylab("Reaction Time (ms)") +
+  xlab("Previous Trial") +
+  coord_cartesian(ylim = c(350, 475)) +
+  scale_color_manual(values=c("black", "red"), guide = guide_legend(title = "Current trial")) +
+  scale_linetype_manual(values=c("solid", "dashed"), guide = F) +
+  theme_bw() +
+  ggtitle("Beginning (no CompleteRep)") 
+  # theme(plot.title = element_text(hjust = 0.5, size = 20),
+  #       axis.title = element_text(size=20),
+  #       axis.text.x = element_text(size=16),
+  #       axis.text.y = element_text(size=16))
+
+```
+
+##### Fixed effects at middle of task:  
+```{r}
+middle.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.middle + (Current.e*Previous.e|Subject), data = filter(dat.use, CompleteRep == 0))
+
+kable(round(summary(middle.e)$coefficients[c(1:3,5),1:5], digits = 3))
+```
+
+**Marginal means:**  
+Error bars represent standard error.  
+``` {r}
+# use dummy coded model
+middle.d <- lmer(RTdrop ~ TrialType*prevTrialType*Trial.middle + (TrialType+prevTrialType|Subject), data = filter(dat.use, CompleteRep == 0))
+parms <- fixef(middle.d) # fixed parameters from model
+vcmat <- vcov(middle.d) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(1,0,0,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(1,0,1,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(1,1,0,0,0,rep(0,3)) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(1,1,0,0,1,rep(0,3)) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## calculate estimates, standard error
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+# format for understanding
+fin$Current = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Previous = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Previous = factor(fin$Previous)
+fin$Current = factor(fin$Current)
+fin = rename(fin, Estimate = est, SE = ses) 
+
+# for plot
+limits <- aes(ymax = Estimate + SE, ymin=Estimate - SE)
+ggplot(fin, aes(x = Previous, y = Estimate, group = Current, color = Current, linetype = Current)) +
+  geom_line() +
+  geom_point(size = 4) +
+  geom_errorbar(limits, width=0.2, linetype="solid") +
+  ylab("Reaction Time (ms)") +
+  xlab("Previous Trial") +
+  coord_cartesian(ylim = c(350, 475)) +
+  scale_color_manual(values=c("black", "red"), guide = guide_legend(title = "Current trial")) +
+  scale_linetype_manual(values=c("solid", "dashed"), guide = F) +
+  theme_bw() +
+  ggtitle("Middle (no CompleteRep)") 
+  # theme(plot.title = element_text(hjust = 0.5, size = 20),
+  #       axis.title = element_text(size=20),
+  #       axis.text.x = element_text(size=16),
+  #       axis.text.y = element_text(size=16))
+
+```
+
+##### Fixed effects at end of task:  
+```{r}
+end.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.end + (Current.e*Previous.e|Subject), data = filter(dat.use, CompleteRep == 0))
+
+kable(round(summary(end.e)$coefficients[c(1:3,5),1:5], digits = 3))
+```
+    
+**Marginal means:**  
+Error bars represent standard error.  
+``` {r}
+# use dummy coded model
+end.d <- lmer(RTdrop ~ TrialType*prevTrialType*Trial.end + (TrialType+prevTrialType|Subject), data = filter(dat.use, CompleteRep == 0))
+parms <- fixef(end.d) # fixed parameters from model
+vcmat <- vcov(end.d) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(1,0,0,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(1,0,1,0,0,rep(0,3)) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(1,1,0,0,0,rep(0,3)) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(1,1,0,0,1,rep(0,3)) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## calculate estimates, standard error
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+# format for understanding
+fin$Current = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Previous = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Previous = factor(fin$Previous)
+fin$Current = factor(fin$Current)
+fin = rename(fin, Estimate = est, SE = ses) 
+
+# for plot
+limits <- aes(ymax = Estimate + SE, ymin=Estimate - SE)
+ggplot(fin, aes(x = Previous, y = Estimate, group = Current, color = Current, linetype = Current)) +
+  geom_line() +
+  geom_point(size = 4) +
+  geom_errorbar(limits, width=0.2, linetype="solid") +
+  ylab("Reaction Time (ms)") +
+  xlab("Previous Trial") +
+  coord_cartesian(ylim = c(350, 475)) +
+  scale_color_manual(values=c("black", "red"), guide = guide_legend(title = "Current trial")) +
+  scale_linetype_manual(values=c("solid", "dashed"), guide = F) +
+  theme_bw() +
+  ggtitle("End (no CompleteRep)") 
+  # theme(plot.title = element_text(hjust = 0.5, size = 20),
+  #       axis.title = element_text(size=20),
+  #       axis.text.x = element_text(size=16),
+  #       axis.text.y = element_text(size=16))
+
+```
+
+
+#### C. TargetRep trials retained, included as covariate
+
+##### Plot over whole task, separately for TargetRep and non-TargetRep  
+**Slopes and estimates of lines are from the MLM, not fitted with OLS.** 
+
+``` {r}
+
+# find slopes and intercepts with dummy coded model, trial (unscaled) is included
+plot1.d <- lmer(RTdrop ~ TrialType*prevTrialType*ExpTrial*TargetRep + (1|Subject), data = dat.use)
+
+parms <- fixef(plot1.d) # fixed parameters from model
+vcmat <- vcov(plot1.d) # variance/covariance matrix of fixed effects
+
+# First calculate slopes
+
+## each row of this matrix defines entries of parms that we want to combine:
+STmat <- matrix(NA,8,16)
+STmat[1,] <- c(0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0) # slope for cC, TargetRep = 0
+STmat[2,] <- c(0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0) # slope for iC, TargetRep = 0
+STmat[3,] <- c(0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0) # slope for cI, TargetRep = 0
+STmat[4,] <- c(0,0,0,1,0,0,1,1,0,0,0,1,0,0,0,0) # slope for iI, TargetRep = 0
+
+STmat[5,] <- c(0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0) # slope for cC, TargetRep = 1
+STmat[6,] <- c(0,0,0,1,0,0,0,1,0,0,1,0,0,0,1,0) # slope for iC, TargetRep = 1
+STmat[7,] <- c(0,0,0,1,0,0,1,0,0,0,1,0,0,1,0,0) # slope for cI, TargetRep = 1
+STmat[8,] <- c(0,0,0,1,0,0,1,1,0,0,1,1,0,1,1,1) # slope for iI, TargetRep = 1
+
+Sparest <- STmat %*% parms          # see above for notation
+Snewvc <- STmat %*% vcmat %*% t(STmat)
+Sses <- sqrt(diag(Snewvc)) 
+
+slopes = cbind(Sparest, Sses) %>% as.data.frame()
+names(slopes) = c("Slope", "Slope_SE")
+
+# Next calculate intercepts
+
+## each row of this matrix defines entries of parms that we want to combine:
+ITmat <- matrix(NA,8,16)
+ITmat[1,] <- c(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0) # intercept for cC, TargetRep = 0
+ITmat[2,] <- c(1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0) # intercept for iC, TargetRep = 0
+ITmat[3,] <- c(1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0) # intercept for cI, TargetRep = 0
+ITmat[4,] <- c(1,1,1,0,0,1,0,0,0,0,0,0,0,0,0,0) # intercept for iI, TargetRep = 0
+
+ITmat[5,] <- c(1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0) # intercept for cC, TargetRep = 1
+ITmat[6,] <- c(1,0,1,0,1,0,0,0,0,1,0,0,0,0,0,0) # intercept for iC, TargetRep = 1
+ITmat[7,] <- c(1,1,0,0,1,0,0,0,1,0,0,0,0,0,0,0) # intercept for cI, TargetRep = 1
+ITmat[8,] <- c(1,1,1,0,1,1,0,0,1,1,0,0,1,0,0,0) # intercept for iI, TargetRep = 1
+
+Iparest <- ITmat %*% parms          # see above for notation
+Inewvc <- ITmat %*% vcmat %*% t(ITmat)
+Ises <- sqrt(diag(Inewvc)) 
+
+## final results
+intercepts = cbind(Iparest, Ises) %>% as.data.frame()
+names(intercepts) = c("Intercept", "Intercept_SE")
+
+forPlotting = cbind(slopes, intercepts)
+
+# label for understanding
+forPlotting$TrialCondition = rep(c("cC", "iC", "cI", "iI"),2)
+forPlotting$TrialCondition = factor(forPlotting$TrialCondition)
+forPlotting$TargetRep = rep(c(0, 1), each=4)
+forPlotting$TargetRep = factor(forPlotting$TargetRep)
+
+
+# BINGO -------------------------------------------------------------------
+ggplot(filter(dat.use, TargetRep == 0), aes(ExpTrial, RTdrop)) +
+  geom_point(alpha=0) +
+  geom_abline(data = forPlotting[1:4,], aes(intercept=Intercept, slope=Slope, color = TrialCondition, linetype = TrialCondition), size=1)+
+  labs(x = "Trial", y = "Reaction Time (ms)") +
+  theme_bw() +
+  ggtitle("No TargetRep (TargetRep = 0)") +
+  coord_cartesian(ylim=c(325, 500)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(filter(dat.use, TargetRep == 1), aes(ExpTrial, RTdrop)) +
+  geom_point(alpha=0) +
+  geom_abline(data = forPlotting[5:8,], aes(intercept=Intercept, slope=Slope, color = TrialCondition, linetype = TrialCondition), size=1)+
+  labs(x = "Trial", y = "Reaction Time (ms)") +
+  theme_bw() +
+  ggtitle("TargetRep (TargetRep = 1)") +
+  coord_cartesian(ylim=c(325, 500)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+##### Beginning of the task
+Current and Previous are effect coded, trial ranges from 0 to 8.
+``` {r}
+begin.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.begin*TargetRep + (1|Subject), data = dat.use)
+
+kable(round(summary(begin.e)$coefficients[c(1:3,6),1:5], digits = 3))
+# interactions with trial
+kable(round(summary(begin.e)$coefficients[c(4, 7:8, 12, 11, 14:16),1:5], digits = 3))
+# interactions with target
+kable(round(summary(begin.e)$coefficients[c(5, 9:10, 13),1:5], digits = 3))
+
+```
+
+##### Middle of the task
+Current and Previous are effect coded, trial ranges from -4 to 4.
+``` {r}
+middle.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.middle*TargetRep + (1|Subject), data = dat.use)
+
+kable(round(summary(middle.e)$coefficients[c(1:3,6),1:5], digits = 3))
+kable(round(summary(middle.e)$coefficients[c(5, 9:10, 13),1:5], digits = 3))
+```
+
+##### End of the task
+Current and Previous are effect coded, trial ranges from -8 to 0.
+``` {r}
+end.e = lmer(RTdrop ~ Current.e*Previous.e*Trial.end*TargetRep + (1|Subject), data = dat.use)
+
+kable(round(summary(end.e)$coefficients[c(1:3,6),1:5], digits = 3))
+kable(round(summary(end.e)$coefficients[c(5, 9:10, 13),1:5], digits = 3))
+```

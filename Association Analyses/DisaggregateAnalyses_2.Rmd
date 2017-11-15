@@ -1,0 +1,55 @@
+---
+title: Disaggregate analyses
+author: Curt, 3/08/2017
+output:
+  html_document:
+    highlight: pygments
+    theme: cerulean
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(dplyr)
+require(lme4)
+require(lmerTest)
+require(ggplot2)
+setwd("C:/Users/cdvrmd/Box Sync/Bruce Projects/Sequential Processing/PointByPoint Processing/Created by R_ArtRej")
+TrialElectLev_dat = read.delim("RT_N2_SlowWave_trial&ElecLev_R.txt")
+MeanCent_dat = read.delim("RT_N2_SlowWave_MeanCent_R.txt" )
+```
+The subject mean and subject mean centered variables have been computed for SlowWavePrev.
+
+A datapoint will be included if:  
+1) Current trial is not rejected due to artifacts.  
+2) Current trial is not the first trial of the block (i.e. trial 1, 101, 201, 301 etc. are not included).  
+3) Both current trial and previous trial are correct.
+4) Previous trial has not been rejecred due to artifacts.
+
+SWPrevMean indicates the between-subject effect.
+SWPrevCent indicates the within-subject effect.
+The random effect "SWPrevCent" allows for tests of whether the association between SWPrev and N2 and RT across trials differs across subjects at levels greater than expected by chance.
+
+SWPrev Predict N2Curr
+```{r data, echo = FALSE}
+#**************************************************************************************************************
+#  ************************Disaggregation************************;
+#N2.
+Dis_N2_Out = lmer(N2Curr ~ SWPrevMean*Prev*Curr + SWPrevCent*Prev*Curr +
+                (Prev+Curr|Subject),    data = MeanCent_dat)
+summary(Dis_N2_Out)
+
+```
+
+
+SWPrev Predict N2Curr
+```{r data, echo = FALSE}
+#**************************************************************************************************************
+#  ************************Disaggregation************************;
+#N2.
+Dis_RT_Out = lmer(RTCurr ~ SWPrevMean*Prev*Curr + SWPrevCent*Prev*Curr +
+                (Prev+Curr|Subject),    data = MeanCent_dat)
+summary(Dis_RT_Out)
+
+```
+

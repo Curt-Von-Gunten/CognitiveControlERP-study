@@ -1,0 +1,272 @@
+---
+title: RT analyses
+author: Hannah, 1/24/2017
+output:
+  html_document:
+    highlight: pygments
+    theme: cerulean
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(width=140)
+require(dplyr)
+require(ggplot2)
+require(lme4)
+require(lmerTest)
+```
+
+Uses RT data from Alc Caf for condition 4 (Placebo-placebo) and condition 5 (Control). Subject 92 (less than 800 trials, possible data collection errors) and 64 (less than 50% accuracy) are excluded. The sample includes 50 subjects.
+
+“Current” trial will be included if:  
+1) Current trial is not the first trial of the block (i.e. trial 1, 101, 201, 301 etc. are not included).  
+2) Both current trial and previous trial are correct.  
+
+Each subject did 800 trials, with 100 trials in each of 8 blocks. RTs were dropped if less than 100 ms and longer than 2000 ms.
+
+
+```{r data, echo = FALSE}
+dat = read.delim("FlankerRT_forR.txt")
+dat = dat[dat$ACC == 1 & dat$PrevTrialACC == 1,]
+
+# discard trials for which RT is less than 100 and greater than 2000
+dat$RTdrop = dat$RT_Raw
+dat$RTdrop[dat$RT_Raw < 100] = NA
+dat$RTdrop[dat$RT_Raw > 2000] = NA
+
+# add trial information
+dat$prevTrialType = NA
+dat$prevTrialType[dat$PrevTrialType == 1] = "compatible"
+dat$prevTrialType[dat$PrevTrialType == 2] = "incompatible"
+dat$prevTrialType = factor(dat$prevTrialType)
+
+# select subjects in Condition 4 and 5, take out 92 and 64
+dat.use = dat[dat$Condition == 4|dat$Condition == 5,] %>% 
+  filter(Subject != 92) %>% 
+  filter(Subject != 64)
+
+```
+
+## 1. Gratton effect at experiment level
+
+```{r plotGratton, echo=FALSE}
+dat.use[!(is.na(dat.use$prevTrialType)),] %>% 
+  ggplot(aes(prevTrialType, RT_Winsor2SD, color = TrialType)) +
+  stat_summary(fun.y = mean, geom = "point") +
+  stat_summary(aes(group=TrialType), fun.y = mean, geom="line") +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = .1) +
+  #facet_wrap(~Task, labeller=labeller(Task = facet_labels)) + 
+  #  ggtitle("Total number of errors") +
+  labs(y = "RT (extreme dropped)", x = "Previous trial") +
+  scale_color_manual(values = c(1, 2), guide = guide_legend(title = "Current trial")) +
+  coord_cartesian(ylim=c(350,450)) +
+  theme_bw() +
+  ggtitle("Condition 4 and condition 5")
+
+```
+
+Current trial type and previous trial type are effect coded.
+
+``` {r testGratton, echo=FALSE}
+# make effect coding variables
+dat.use$Current.e = NA
+dat.use$Current.e[dat.use$TrialType == "compatible"] = -1
+dat.use$Current.e[dat.use$TrialType == "Incompatible"] = 1
+
+dat.use$Previous.e = NA
+dat.use$Previous.e[dat.use$prevTrialType == "compatible"] = -1
+dat.use$Previous.e[dat.use$prevTrialType == "incompatible"] = 1
+
+
+# model determined through model specification procedures (see "1 Find CAE.R)
+lmer(RTdrop ~ Current.e*Previous.e + (Current.e|Subject), data = dat.use) %>% 
+  summary() # use this
+```
+
+Significant interaction between current trial and previous trial indicates the presence of the Gratton effect. **Need pairwise comparisons?**
+
+## 2. Binning analyses
+
+Here I separated trials into four bins of 200 trials each (to match binning analysis of N2). 
+
+``` {r binplot, echo = FALSE}
+dat.use$Bin[dat.use$Block == 1|dat.use$Block == 2] = 1
+dat.use$Bin[dat.use$Block == 3|dat.use$Block == 4] = 2
+dat.use$Bin[dat.use$Block == 5|dat.use$Block == 6] = 3
+dat.use$Bin[dat.use$Block == 7|dat.use$Block == 8] = 4
+
+dat.use[!(is.na(dat.use$prevTrialType)),] %>% 
+  ggplot(aes(prevTrialType, RT_Winsor2SD, color = TrialType)) +
+  stat_summary(fun.y = mean, geom = "point") +
+  stat_summary(aes(group=TrialType), fun.y = mean, geom="line") +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = .1) +
+  facet_wrap(~Bin) + 
+  #  ggtitle("Total number of errors") +
+  labs(y = "RT (extreme dropped)", x = "Previous trial") +
+  scale_color_manual(values = c(1, 2), guide = guide_legend(title = "Current trial")) +
+  coord_cartesian(ylim=c(350,450)) +
+  theme_bw() 
+
+```
+
+#### Bin 1 
+Just shows fixed effects
+``` {r bin1, echo = FALSE}
+# same random effects structure as experiment model
+bin1 = dat.use[dat.use$Bin == 1,] %>% 
+  lmer(RTdrop ~ Current.e*Previous.e + (Current.e|Subject), .)
+round(summary(bin1)$coefficients, digits = 4)
+```
+#### Bin 2 
+Just shows fixed effects
+``` {r bin2, echo = FALSE}
+# same random effects structure as experiment model
+bin2 = dat.use[dat.use$Bin == 2,] %>% 
+  lmer(RTdrop ~ Current.e*Previous.e + (Current.e|Subject), .)
+round(summary(bin2)$coefficients, digits = 4)
+```
+#### Bin 3 
+Just shows fixed effects
+``` {r bin3, echo = FALSE}
+# same random effects structure as experiment model
+bin3 = dat.use[dat.use$Bin == 3,] %>% 
+  lmer(RTdrop ~ Current.e*Previous.e + (Current.e|Subject), .)
+round(summary(bin3)$coefficients, digits = 4)
+```
+#### Bin 4 
+Just shows fixed effects
+``` {r bin4, echo = FALSE}
+# same random effects structure as experiment model
+bin4 = dat.use[dat.use$Bin == 4,] %>% 
+  lmer(RTdrop ~ Current.e*Previous.e + (Current.e|Subject), .)
+round(summary(bin4)$coefficients, digits = 4)
+```
+
+## 3. Trial level analyses across course of task
+Here I'm using all accepted trials (see criteria above) for all subjects across the course of the experiment (across 800 trials). Plotted data points are NOT summarized over subjects.
+
+``` {r trialLevel, echo = FALSE, warning = FALSE}
+# data set up in 8 blocks, trial goes 1-100 in each block
+# add column for trial number across whole experiment so it goes 1-800
+dat.use$ExpTrial = dat.use$Trial + (100*(dat.use$Block - 1))
+
+# add label for trial condition
+dat.use$TrialCondition = "Previous compatible - Current incompatible"
+dat.use$TrialCondition[dat.use$prevTrialType == "compatible" & dat.use$TrialType == "compatible"] = 
+  "Previous compatible - Current compatible"
+dat.use$TrialCondition[dat.use$prevTrialType == "incompatible" & dat.use$TrialType == "Incompatible"] = 
+  "Previous incompatible - Current incompatible"
+dat.use$TrialCondition[dat.use$prevTrialType == "incompatible" & dat.use$TrialType == "compatible"] = 
+  "Previous incompatible - Current compatible"
+dat.use$TrialCondition = factor(dat.use$TrialCondition)
+
+# summarise across subjects for plotting
+ggplot(dat.use, aes(ExpTrial, RTdrop, alpha = TrialCondition, color = TrialCondition, shape = TrialCondition)) +
+  geom_point() +
+  geom_smooth(method = "lm", se=F, lwd = 1.3) +
+  labs(x = "Trial", y = "RT (dropped if <100 and >2000)") +
+  scale_shape_manual(values=c(1,19,1,19)) +
+  scale_alpha_manual(values=c(.1,.1,.1,.1)) +
+  scale_color_manual(values=c("blue", "dodgerblue", "darkred", "red")) +
+  theme_bw() +
+  coord_cartesian(ylim=c(325, 500)) 
+```
+
+##### Simple slopes
+``` {r simple, echo = FALSE}
+fm2 <- lmer(RTdrop ~ TrialType*prevTrialType*ExpTrial + (TrialType|Subject), data = dat.use)
+
+parms <- fixef(fm2) # fixed parameters from model
+vcmat <- vcov(fm2) # variance/covariance matrix of fixed effects
+
+## each row of this matrix defines entries of parms that we want to combine:
+Tmat <- matrix(NA,4,8)
+Tmat[1,] <- c(rep(0,3),1,0,0,0,0) # weights for estimates for current = 0, previous = 0 (current compat-previous compat)
+Tmat[2,] <- c(rep(0,3),1,0,0,1,0) # weights for estimates for current = 0, previous = 1 (current compat-previous incompat)
+Tmat[3,] <- c(rep(0,3),1,0,1,0,0) # weights for estimates for current = 1, previous = 0 (current incompat-previous compat)
+Tmat[4,] <- c(rep(0,3),1,0,1,1,1) # weights for estimates for current = 1, previous = 1 (current incompat-previous incompat)
+
+parest <- Tmat %*% parms          # see above for notation
+newvc <- Tmat %*% vcmat %*% t(Tmat)
+ses <- sqrt(diag(newvc)) 
+
+## final results
+fin = cbind(parest, ses) %>% as.data.frame()
+names(fin) = c("est", "ses")
+
+# to calculate 95% CI intervals, lower bound = m - 2*SE, upper bound = m + 2*SE
+
+fin$lbnd = fin$est - 2*fin$ses
+fin$ubnd = fin$est + 2*fin$ses
+
+fin = format(fin, digits = 3)
+
+# relabel for understanding
+fin$Previous = c("Compat", "Compat", "Incompat", "Incompat")
+fin$Current = c("Compat", "Incompat", "Compat", "Incompat")
+fin$Color = c("dark blue", "light blue", "dark red", "light red")
+
+fin = rename(fin, Estimate = est, SE = ses, ci95_lower = lbnd, ci95_upper = ubnd)
+
+# display
+fin
+```  
+
+#### Beginning of experiment
+Trial ranges from 0-798 to estimate effects of previous and current trial at the beginning of the experiment. Categorical variables are effect coded.
+``` {r begin, echo = FALSE}
+dat.use$Tr.begin = dat.use$ExpTrial - 2
+
+begin = lmer(RTdrop ~ Current.e*Previous.e*Tr.begin + (Current.e|Subject), data = dat.use)
+
+round(summary(begin)$coefficients, digits = 4)
+```
+  
+##### Summary
+**At the beginning of the experiment:**  
+1. The effect of current trial is significant (compatible is faster than incompatible)  
+2. No effect of previous trial  
+3. No interaction  
+
+**Over the course of the experiment:**  
+1. Significant effect of trial (RT getting faster over time)  
+2. Significant trial x Current trial interaction (effect of current trial decreases over time)  
+
+
+#### Middle of experiment
+Trial ranges from -399 to 399 to estimate effects of previous and current trial at the middle of the experiment. Categorical variables are effect coded.
+  
+*Effect of Trial, Current x Trial, Previous x Trial, and Current x Previous x Trial are still being estimated, but not being displayed. They will match the estimates from the first model exactly.*
+``` {r middle, echo = FALSE}
+dat.use$Tr.middle = dat.use$Tr.begin - 399
+
+middle = lmer(RTdrop ~ Current.e*Previous.e*Tr.middle + (Current.e|Subject), data = dat.use)
+
+round(summary(middle)$coefficients[c(1:3,5),1:5], digits = 4)
+```
+  
+##### Summary
+**At the middle of the experiment:**  
+1. The effect of current trial is still significant (compatible is faster than incompatible)  
+2. Still no effect of previous trial  
+3. Now significant effect of current x previous (p < .002)  
+
+
+#### End of experiment
+Trial ranges from -798 to 0 to estimate effects of previous and current trial at the end of the experiment. Categorical variables are effect coded.
+
+*Effect of Trial, Current x Trial, Previous x Trial, and Current x Previous x Trial are still being estimated, but not being displayed. They will match the estimates from the first model exactly.*
+``` {r end, echo = FALSE}
+dat.use$Tr.end = dat.use$Tr.begin - 798
+
+end = lmer(RTdrop ~ Current.e*Previous.e*Tr.end + (Current.e|Subject), data = dat.use)
+
+round(summary(end)$coefficients[c(1:3,5),1:5], digits = 4)
+```
+  
+##### Summary
+**At the end of the experiment:**  
+1. The effect of current trial is still significant (compatible is faster than incompatible)  
+2. Still no effect of previous trial  
+3. Now marginally effect of current x previous (p < .097)  
